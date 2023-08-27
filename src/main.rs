@@ -3,7 +3,7 @@ use std::fs;
 const ALPHABET: &str = " abcdefghijklmnopqrstuvwxyz.!?12";
 
 fn main() {
-    let input = "hello. this is a test".to_owned();
+    let input = "aa".to_owned();
 
     //let input = fs::read_to_string("bible2022.txt").unwrap();
     println!("{}", input.len());
@@ -17,6 +17,7 @@ fn main() {
 
     let decoded = decode(encoded);
     println!("decoded len: {}", decoded.len());
+    println!("decoded text: {:?}", decoded);
     //fs::write("out.bin", result).unwrap();
 
     fs::write("unsmol.bin", decoded).unwrap();
@@ -66,11 +67,13 @@ fn decode(input: Vec<u8>) -> String {
         };
         let current: u16 = ((secound_byte as u16) << 8) | first_byte as u16;
         
-        //println!("{:016b}", current);
+        let formatted = format!("{:016b}", current);
+        let buety = formatted.split_at(8);
+        println!("{:?}", buety);
 
         let char_index = (current & (31 << (offset%8))) >> (offset%8);
         let char = index_to_char(char_index as usize);
-        //println!("{:?}, at offset {}", char, offset);
+        println!("{:?}, at offset {}", char, offset);
         out_string.push(char);
         offset += 5;
     }
@@ -93,5 +96,5 @@ fn index_to_char(search_index: usize) -> char {
             return char;
         }
     }
-    return ' ';
+    return ALPHABET.chars().nth(0).unwrap();
 }
