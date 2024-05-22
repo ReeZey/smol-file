@@ -1,9 +1,10 @@
 [package]
-name = "smolstr2"
+name = "smol-file"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-leb128 = "^0.2.5"
+leb128 = "0.2"
+anyhow = "1"
