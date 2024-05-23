@@ -5,7 +5,7 @@ fn main() {
     println!("testing with input \"test\"");
     println!();
 
-    let input: String = "test".to_owned();
+    let input: String = "This is a TEST. and UpperCase! 123".to_owned();
     println!("> input text len: {}", input.len());
     println!("> input text: {}", input);
     fs::write("raw.bin", &input).unwrap();

@@ -3,7 +3,7 @@ name = "smol-file"
 version = "0.1.0"
 edition = "2021"
 
-license-file = "LICENSE"
+license = "GPL-3.0"
 description = "5-bit letter encoding"
 repository = "https://github.com/ReeZey/smol-file/"
 readme = "README.md"
