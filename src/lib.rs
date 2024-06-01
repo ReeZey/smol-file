@@ -22,12 +22,12 @@
 //! see also [`SmolBlob`]
 
 use std::io::{ Cursor, Read };
-use anyhow::{ Result, Error };
+use anyhow::{ Error, Ok, Result };
 use utils::{char_to_index, index_to_char};
 mod utils;
 
 // CHANGE THIS EACH RELEASE
-const VERSION: u64 = 2;
+const VERSION: u64 = 3;
 
 #[allow(dead_code)]
 pub struct SmolBlob {
@@ -41,9 +41,6 @@ pub struct SmolBlob {
 
     number_mode: bool,
     super_mode: bool,
-
-    current_bit: u8,
-    byte_index: usize,
 }
 
 impl Default for SmolBlob {
@@ -56,8 +53,6 @@ impl Default for SmolBlob {
             offset: 0, 
             number_mode: false, 
             super_mode: false,
-            current_bit: 0,
-            byte_index: 0,
         }
     }
 }
@@ -81,9 +76,14 @@ impl SmolBlob {
         buffer
     }
 
-    /// returns the inner buffer length **ONLY**, not to be confused by [`SmolBlob::buffer`].len()
-    pub fn len(&self) -> usize {
-        self.buffer().len()
+    /// return nececcary stuff for reconstruction  
+    /// useful for IRC/generic datastream transfer, where header is not needed
+    pub fn buffer_headerless(&self) -> Vec<u8> {
+        let mut buffer = vec![];
+        leb128::write::unsigned(&mut buffer, self.size).unwrap();
+        buffer.extend(self.buffer.clone());
+
+        buffer
     }
 
     /// encodes a [`String`] and returns a [`SmolBlob`]
@@ -109,10 +109,38 @@ impl SmolBlob {
                     blob.number_mode = false;
                 }
 
+                //fuck windows
+                if char == '\r' {
+                    continue;
+                }
+
+                if char == '\n' {
+                    blob.push_char('2');
+                    blob.push_char(' ');
+                    continue;
+                }
+
+                let invalid_char = char_to_index(char);
+                if invalid_char.is_none() {
+                    let mut buffer = vec![0; char.len_utf8()];
+                    char.encode_utf8(&mut buffer);
+
+                    blob.push_char('2');
+                    blob.push_char('1');
+
+                    
+                    let length = char.len_utf8();
+
+                    for char in buffer {
+                        blob.buffer.push(char);
+                    }
+                    continue;
+                }
+                
                 if char.is_uppercase() {
                     blob.push_char('2');
                 }
-
+                
                 blob.push_char(char.to_ascii_lowercase());
             } 
         }
@@ -132,7 +160,9 @@ impl SmolBlob {
     fn push_char(&mut self, char: char) {
         self.size += 1;
 
-        let index = utils::char_to_index(char);
+        let char= utils::char_to_index(char);
+
+        let index = char.unwrap_or(0);
         self.current |= (index as u16) << self.offset;
         self.offset += 5;
         if self.offset >= 8 {
@@ -185,12 +215,9 @@ impl SmolBlob {
         let mut out_string = String::new();
 
         for _ in 0..size {
-            let char = match blob.read_char() {
-                Some(c) => c,
-                None => break,
-            };
+            let char = blob.read_char();
             
-            if char.is_numeric() {
+            if char.is_numeric() && !blob.super_mode {
                 match char {
                     '1' => {
                         blob.number_mode = !blob.number_mode;
@@ -202,49 +229,64 @@ impl SmolBlob {
                         return Err(Error::msg("invalid data when decoding"));
                     }
                 }
-            } else {
-                if blob.number_mode {
-                    let num: u32 = char_to_index(char) as u32;
-                    out_string.push(char::from_digit(num, 10).unwrap());
-                } else {
-                    if blob.super_mode {
+                continue;
+            }
+            
+            if blob.number_mode {
+                let num: u32 = char_to_index(char).unwrap_or(0) as u32;
+                out_string.push(char::from_digit(num, 10).unwrap());
+                continue;
+            }
+
+            if blob.super_mode {
+                match char {
+                    ' ' => {
+                        out_string.push('\n');
+                    }
+                    '1' => {
+                        let size: u32 = blob.buffer.remove(0) as u32 | 
+                                    (blob.buffer.remove(0) as u32) << 8 | 
+                                    (blob.buffer.remove(0) as u32) << 16 | 
+                                    (blob.buffer.remove(0) as u32) << 24;
+
+                        let mut buffer = vec![];
+                        for _ in 0..size {
+                            buffer.push(blob.buffer.remove(0))
+                        }
+                        out_string += &String::from_utf8(buffer).unwrap();
+                    }
+                    _ => {
                         out_string.push(char.to_ascii_uppercase());
-                        blob.super_mode = false;
-                    } else {
-                        out_string.push(char);
                     }
                 }
+                blob.super_mode = false;
+                continue;
             }
+
+            out_string.push(char);
         }
     
         Ok(out_string)
     }
 
-    fn read_char(&mut self) -> Option<char> {
-        let byte_index = match self.buffer.get(self.byte_index) {
-            Some(i) => i,
-            None => return None,
-        };
+    fn read_char(&mut self) -> char {
+        let current_byte = self.buffer.get(0).unwrap();
 
-        let mut current: u8 = (byte_index >> self.current_bit) & 0x1F;
+        let mut current: u8 = (current_byte >> self.offset) & 0x1F;
     
-        if self.current_bit >= 4 {
-            if self.byte_index == (self.buffer.len() - 1) {
-                return None;
-            } 
-
-            current |= (self.buffer[self.byte_index + 1]  << (8 - self.current_bit)) & 0x1F;
+        if self.offset >= 4 {
+            current |= (self.buffer.get(1).unwrap()  << (8 - self.offset)) & 0x1F;
         }
 
-        self.current_bit += 5;
-        if self.current_bit >= 8 {
-            self.byte_index += 1;
-            self.current_bit -= 8;
+        self.offset += 5;
+        if self.offset >= 8 {
+            self.buffer.remove(0);
+            self.offset -= 8;
         }
 
         let char = utils::index_to_char(current as usize);
 
-        return Some(char);
+        return char;
     }
 
     /// decodes a [`SmolBlob`] and returns a [`String`]  
@@ -257,5 +299,21 @@ impl SmolBlob {
     /// ```
     pub fn decode_blob(input: &SmolBlob) -> Result<String, Error> {
         return SmolBlob::decode(&input.buffer());
+    }
+
+    /// decodes a [`SmolBlob::buffer_headerless`] and returns a [`String`]  
+    /// # example
+    ///
+    /// ```
+    /// let decoded: String = SmolBlob::decode_headerless(&encoded.buffer_headerless()).unwrap();
+    /// fs::write("unsmol.bin", &decoded).unwrap();
+    /// ```
+    pub fn decode_headerless(input: &Vec<u8>) -> Result<String, Error> {
+        let mut curs = Cursor::new(input);
+        let mut blob = SmolBlob::default();
+        blob.size = leb128::read::unsigned(&mut curs)?;
+        curs.read_to_end(&mut blob.buffer)?;
+        
+        return SmolBlob::decode_blob(&blob);
     }
 }

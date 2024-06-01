@@ -1,12 +1,12 @@
 const ALPHABET: &str = " abcdefghijklmnopqrstuvwxyz.!?12";
 
-pub(crate) fn char_to_index(search_char: char) -> usize {
+pub(crate) fn char_to_index(search_char: char) -> Option<usize> {
     for (index, char) in ALPHABET.chars().enumerate() {
         if search_char == char {
-            return index;
+            return Some(index);
         }
     }
-    return 0;
+    return None;
 }
 
 pub(crate) fn index_to_char(search_index: usize) -> char {
